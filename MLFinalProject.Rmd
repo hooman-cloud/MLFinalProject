@@ -1,0 +1,150 @@
+---
+title: "MLFinalProject"
+output: html_document
+---
+
+# Read in the data sets
+
+
+```{r , echo=TRUE}
+
+setwd("C:/DataScience/Coursera_DataScience/MLCourseProject")
+trainingDataSet <- read.csv("pml-training.csv", sep = ",")
+quizDataSet <- read.csv("pml-testing.csv", sep = ",")
+dim(trainingDataSet)
+str(trainingDataSet)
+
+```
+
+# Load the necessary libraries
+
+```{r, echo=TRUE}
+library("caret")
+library("corrplot")
+library("dplyr")
+library("rattle")
+library("e1071")
+```
+
+# Break the training data set
+
+```{r, echo=TRUE}
+inTrain <- createDataPartition(y = trainingDataSet$classe, p = 0.75, list = FALSE)
+training <- trainingDataSet[inTrain,]
+validation <- trainingDataSet[-inTrain,]
+
+```
+
+# Remove NAs and small values
+
+```{r, echo = TRUE}
+
+trainingCopy <- training
+validationCopy <- validation
+quizCopy <- quizDataSet
+
+
+removeColumns <- c()
+
+for(i in 1:ncol(trainingCopy)) {      
+  if (mean(sapply(trainingCopy[,i], function(x) is.na(x))) > 0.1) {
+    removeColumns <- c(removeColumns, i)
+  }
+}
+
+trainingCopy <- trainingCopy[, -removeColumns]
+validationCopy <- validationCopy[, -removeColumns]
+quizCopy <- quizCopy[, -removeColumns]
+
+nzv <- nearZeroVar(trainingCopy)
+trainingCopy <- trainingCopy[, -nzv]
+validationCopy <- validationCopy[, -nzv]
+quizCopy <- quizCopy[, -nzv]
+
+dim(trainingCopy)
+dim(validationCopy)
+dim(quizCopy)
+
+```
+
+# Remove unnecessary columns
+
+```{r, echo = TRUE}
+trainingCopy <- trainingCopy[, -(1:5)]
+validationCopy <- validationCopy[, -(1:5)]
+quizCopy <- quizCopy[, -(1:5)]
+
+```
+# Analyze the correlation between features
+
+```{r, echo = TRUE}
+
+descrCor <-  cor(trainingCopy[,-54])
+summary(descrCor[upper.tri(descrCor)])
+
+highlyCor <- findCorrelation(descrCor, cutoff = .9)
+trainingCopy <- trainingCopy[,-highlyCor]
+validationCopy <- validationCopy[,-highlyCor]
+quizCopy <- quizCopy[,-highlyCor]
+
+
+descrCor2 <- cor(trainingCopy[,-dim(trainingCopy)[2]])
+col<- colorRampPalette(c("red", "white", "blue"))(20)
+corrplot(descrCor2, method="circle", type="lower", order="hclust", col = col)
+```
+# Scale and center the data
+
+```{r, echo = TRUE}
+
+centeredTrainingObj <- preProcess(trainingCopy, method = c("center", "scale"))
+trainingCopyTransformed <- predict(centeredTrainingObj, trainingCopy)
+validationCopyTransformed <- predict(centeredTrainingObj, validationCopy)
+quizCopyTransformed <- predict(centeredTrainingObj, quizCopy)
+
+```
+# Perform PCA to further reduce dimensionality
+
+```{r, echo = TRUE}
+
+pcaTrainingObj <- preProcess(trainingCopyTransformed, method=c("pca"), thresh = 0.9)
+pcaTraining <- predict(pcaTrainingObj, trainingCopyTransformed)
+pcaValidation <- predict(pcaTrainingObj, validationCopyTransformed)
+pcaQuiz <- predict(pcaTrainingObj, quizCopyTransformed)
+
+```
+
+# Run Decision Tree and Random Forest for classification
+
+```{r, echo = TRUE}
+
+set.seed(2223)
+modDT <- train(classe ~ ., data = pcaTraining, method="rpart")
+# fancyRpartPlot(modFit$finalModel)
+confusionMatrix(as.factor(pcaTraining$classe), predict(modDT, pcaTraining))
+
+set.seed(2224)
+crossValidation <- trainControl(method = "repeatedcv", number = 3, repeats = 2)
+modRF  <- train(as.factor(classe) ~ ., data = pcaTraining, method = "rf",
+                 trControl = crossValidation, verbose = FALSE)
+# modFit <- train(as.factor(classe) ~ ., data = pcaTraining, method="rf")
+# fancyRpartPlot(modFit$finalModel)
+confusionMatrix(as.factor(pcaTraining$classe), predict(modRF, pcaTraining[,-1]))
+
+predictedValidation <- predict(modRF, pcaValidation[,-1])
+confusionMatrix(as.factor(pcaValidation$classe), predict(modRF, pcaValidation[,-1]))
+
+```
+As seen, random forest does a much better job compared to the decition tree itself. This
+is mainly because of the ensemble averaging nature of the random forest algorithm and also
+the fact that we utilize the cross validation method.
+
+# Predict the quiz data set
+
+```{r, echo = TRUE}
+
+as.data.frame(predict(modRF, pcaQuiz[,-1]))
+
+
+```
+
+
